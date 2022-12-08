@@ -3342,7 +3342,7 @@ class WorkThread(QThread):
         spec_ER_child = [10, 100]
         spec_ER_mother = [15, 100]
         #spec_ER_voaJudge = 25  # judge if to skip VOA calibration
-        spec_Res_TxMPD = [0.0001, 0.0031]
+        spec_Res_TxMPD = [0.0001, 0.005]
         judge_TxPDL = test_result.iloc[:, 6]
         judge_IL = test_result.iloc[:, 7]
         judge_TxMPD_res = test_result.iloc[:, -2:]
@@ -3974,7 +3974,7 @@ class WorkThread(QThread):
                                          'TX_ROLLOFF_XQ', 'TX_BW3DB_XQ', 'TX_BW6DB_XQ', 'Kink_XQ', 'sigma_XQ',
                                          'TX_ROLLOFF_YI', 'TX_BW3DB_YI', 'TX_BW6DB_YI', 'Kink_YI', 'sigma_YI',
                                          'TX_ROLLOFF_YQ', 'TX_BW3DB_YQ', 'TX_BW6DB_YQ', 'Kink_YQ', 'sigma_YQ',
-                                         'amp_XI', 'amp_XQ', 'amp_YI', 'amp_YQ'))
+                                         'amp_XI', 'amp_XQ', 'amp_YI', 'amp_YQ','Res_TxMPDX','Res_TxMPDY'))
         config = [sn, mawin.desk, mawin.temp[0]] + timestamp.split('_')
         report_name = sn + '_TxBW_' + timestamp + '.csv'
         report_judgename = sn + '_TxBW_Report_' + timestamp + '.xlsx'
@@ -3996,6 +3996,30 @@ class WorkThread(QThread):
                 break
             self.sig_print.emit('ABC获取成功...')
             print('max,min,abc,ER,Tvpi:\n', data)
+
+            # add Tx MPD responsibity test
+            print('设置工作点到max，测试TxMPD响应度')
+            abc_ok = data[0][:]
+            abc_tmp = [0] * 6  # np.zeros(6)
+            while not operator.eq(abc_ok, abc_tmp):
+                cb.set_abc(mawin, abc_ok)
+                abc_tmp = cb.get_abc(mawin)
+            time.sleep(0.5)
+            # X/Y max case read the vcode and calculate responsivity of Tx MPD X/Y
+            pwr_cal = float(mawin.ITLA_pwr.iloc[int(mawin.channel[i]) - 1, 1]) #C80 only
+            vcodeX, vcodeY = cb.Tx_MPD_responsivity_Test(mawin, 'XmaxYmax')
+            res_TxMPDX = 1000 * (vcodeX - int(noipwr[0])) * 3.3 / (
+                    mawin.R_txmpdx * 65535 * 10 ** (pwr_cal / 10))
+            res_TxMPDY = 1000 * (vcodeY - int(noipwr[1])) * 3.3 / (
+                    mawin.R_txmpdy * 65535 * 10 ** (pwr_cal / 10))
+            print('vcodeX:', vcodeX)
+            print('vcodeY:', vcodeY)
+            print('Res_TX_MPDX(mA/mW):', res_TxMPDX)
+            print('Res_TX_MPDY(mA/mW):', res_TxMPDY)
+
+            #work left here to add the res monitor and adjust the power to make the amplitude align
+            pass
+
             abc = data[2][:]
             # get power meter reading of X-max Y-max power
             abc_ok = abc[:]
@@ -4003,6 +4027,7 @@ class WorkThread(QThread):
             while not operator.eq(abc_ok, abc_tmp):
                 cb.set_abc(mawin, abc_ok)
                 abc_tmp = cb.get_abc(mawin)
+
             self.sig_print.emit('Open EDFA')
             mawin.CtrlB.write(b'edfa_on\n')
             bias_ch = 1;
@@ -4087,7 +4112,8 @@ class WorkThread(QThread):
                             cb.set_abc(mawin, abc_ok)
                             abc_tmp = cb.get_abc(mawin)
                         tt.append([rolloff, BW3dB, BW6dB, kink, sigma_ss])
-            tt1 = config + [str(mawin.channel[i])] + tt[0] + tt[1] + tt[2] + tt[3] + amp_list
+
+            tt1 = config + [str(mawin.channel[i])] + tt[0] + tt[1] + tt[2] + tt[3] + amp_list+[res_TxMPDX,res_TxMPDY]
             test_result.loc[i] = tt1
             test_result.to_csv(report_file, index=False)
             self.sig_progress.emit(round(20 + (75 / len(mawin.channel) * (i + 1))))
@@ -4117,10 +4143,12 @@ class WorkThread(QThread):
         spec_TxBW6DB = [15, 50]
         spec_amp = [-33, 0]
         spec_Imbalance = [0, 6]
+        spec_Res_TxMPD = [0.0001, 0.005]
         # spec_ER_voaJudge = 25  # judge if to skip VOA calibration
         judge_TxRolloff = test_result.iloc[:, [6, 11, 16, 21]]
         judge_TxBW3DB = test_result.iloc[:, [7, 12, 17, 22]]
         judge_TxBW6DB = test_result.iloc[:, [8, 13, 18, 23]]
+        judge_TxMPD_res = test_result.iloc[:, -2:]
         # TxBW
         mawin.finalResult = 'Pass'
         if not spec_TxRollOff[0] < np.max(np.max(judge_TxRolloff)) < spec_TxRollOff[1]:
@@ -4138,6 +4166,9 @@ class WorkThread(QThread):
         if not spec_Imbalance[0] < np.max(np.max(amp_list))-np.min(np.min(amp_list)) < spec_Imbalance[1]:
             print('Raw RF output 1.5G amplitude imbalance failed detected, XI,XQ,YI,YQ: \n', amp_list)
             mawin.finalResult = 'Fail'
+        if not spec_Res_TxMPD[0] < np.min(np.min(judge_TxMPD_res)) < spec_Res_TxMPD[1]:
+            print('Responisvity TxMPD failed detected: ')
+            mawin.finalResult='Fail'
         print(mawin.finalResult)
         # Copy golden CSV data to folder under golden sample
         if mawin.test_type == '金样':
