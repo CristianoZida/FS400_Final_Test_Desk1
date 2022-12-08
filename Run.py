@@ -3967,6 +3967,9 @@ class WorkThread(QThread):
             self.sig_print.emit('ZVA初始化完成...')
         self.sig_progress.emit(20)
         self.sig_print.emit('开始TxBW测试...')
+        #get noise power
+        self.sig_print.emit('获取底噪(Get noise power)...')
+        noipwr=cb.get_noipwr(mawin)
         # if normal ITLA(Not C++ ITLA) then wavelength minus 8
         # define the data frame to store the test data
         test_result = DataFrame(columns=('SN', 'TX_BW_DESK', 'TEMP', 'DATE', 'TIME', '400G_CH',
